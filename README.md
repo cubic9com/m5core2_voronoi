@@ -1,8 +1,6 @@
 
 # Overview
 
-A sketch for [M5Stack Core2](https://docs.m5stack.com/#/en/core/core2).
-
 The m5core2_voronoi project is an interactive Voronoi diagram renderer for the [M5Stack Core 2](https://docs.m5stack.com/#/en/core/core2) .
 
 \[日本語\]

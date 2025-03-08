@@ -14,7 +14,7 @@ const float REPULSION_STRENGTH = 15000.0F;
 const float REPULSION_RADIUS = 150.0F;
 
 // Tone settings for feedback sound
-const uint8_t TONE_VOLUME = 90U;//48U;
+const uint8_t TONE_VOLUME = 48U;
 const float TONE_FREQUENCY = 659.26F;
 const uint32_t TONE_DURATION = 50U;
 

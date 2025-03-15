@@ -3,6 +3,8 @@
 #include <M5Unified.h>
 #include <vector>
 #include <cmath>
+#include <memory>
+#include <esp_heap_caps.h>
 
 // Class for managing Voronoi diagram
 class VoronoiDiagram {
@@ -14,8 +16,18 @@ public:
         uint16_t color;
     };
 
+    // Seed point structure for Jump Flooding Algorithm
+    struct SeedPoint {
+        int16_t x;      // x-coordinate
+        int16_t y;      // y-coordinate
+        int16_t idx;    // index of the original point
+    };
+
     // Constructor
     VoronoiDiagram(M5Canvas& buffer, SemaphoreHandle_t mutex);
+    
+    // Destructor
+    ~VoronoiDiagram();
 
     // Add a point
     void addPoint(int x, int y);
@@ -27,13 +39,22 @@ private:
     // Apply repulsive force to move points
     void applyRepulsiveForce();
 
-    // Render Voronoi diagram
+    // Render Voronoi diagram using Jump Flooding Algorithm
     void renderVoronoiDiagram();
+    
+    // Initialize JFA buffers in PSRAM
+    void initJFABuffers();
+    
+    // Free JFA buffers
+    void freeJFABuffers();
+    
+    // Execute Jump Flooding Algorithm
+    void executeJFA();
 
     // Render points
     void renderPoints();
 
-    // Get index of the nearest point
+    // Get index of the nearest point (used as fallback)
     int getNearestPointIndex(int x, int y) const;
 
     // List of points
@@ -44,6 +65,15 @@ private:
 
     // Mutex for drawing
     SemaphoreHandle_t drawMutex;
+
+    // JFA buffers (allocated in PSRAM)
+    SeedPoint* jfaBufferA = nullptr;
+    SeedPoint* jfaBufferB = nullptr;
+    
+    // Screen dimensions
+    int screenWidth = 0;
+    int screenHeight = 0;
+    int screenSize = 0;  // width * height
 
     // Maximum number of points
     static constexpr std::size_t MAX_POINT_COUNT = 16U;

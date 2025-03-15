@@ -1,6 +1,9 @@
 #include "VoronoiDiagram.h"
 #include <esp_random.h>
 #include <algorithm>
+#include <esp_log.h>
+
+static const char* TAG = "VoronoiDiagram";
 
 // Mutex lock class using RAII pattern
 class MutexLock {
@@ -27,6 +30,55 @@ VoronoiDiagram::VoronoiDiagram(M5Canvas& buffer, SemaphoreHandle_t mutex)
     : screenBuffer(buffer), drawMutex(mutex) {
     // Pre-allocate memory for point list
     points.reserve(MAX_POINT_COUNT);
+    
+    // Get screen dimensions
+    screenWidth = M5.Display.width();
+    screenHeight = M5.Display.height();
+    screenSize = screenWidth * screenHeight;
+    
+    // Initialize JFA buffers in PSRAM
+    initJFABuffers();
+}
+
+// Destructor
+VoronoiDiagram::~VoronoiDiagram() {
+    // Free JFA buffers
+    freeJFABuffers();
+}
+
+// Initialize JFA buffers in PSRAM
+void VoronoiDiagram::initJFABuffers() {
+    // Free existing buffers if any
+    freeJFABuffers();
+    
+    // Allocate buffers in PSRAM
+    jfaBufferA = (SeedPoint*)heap_caps_malloc(screenSize * sizeof(SeedPoint), MALLOC_CAP_SPIRAM);
+    jfaBufferB = (SeedPoint*)heap_caps_malloc(screenSize * sizeof(SeedPoint), MALLOC_CAP_SPIRAM);
+    
+    if (!jfaBufferA || !jfaBufferB) {
+        ESP_LOGE(TAG, "Failed to allocate JFA buffers in PSRAM");
+        // Fallback to regular memory if PSRAM allocation fails
+        freeJFABuffers();
+        jfaBufferA = (SeedPoint*)malloc(screenSize * sizeof(SeedPoint));
+        jfaBufferB = (SeedPoint*)malloc(screenSize * sizeof(SeedPoint));
+        
+        if (!jfaBufferA || !jfaBufferB) {
+            ESP_LOGE(TAG, "Failed to allocate JFA buffers in regular memory");
+        }
+    }
+}
+
+// Free JFA buffers
+void VoronoiDiagram::freeJFABuffers() {
+    if (jfaBufferA) {
+        free(jfaBufferA);
+        jfaBufferA = nullptr;
+    }
+    
+    if (jfaBufferB) {
+        free(jfaBufferB);
+        jfaBufferB = nullptr;
+    }
 }
 
 // Add a point
@@ -81,22 +133,133 @@ void VoronoiDiagram::draw() {
     screenBuffer.pushSprite(&M5.Display, 0, 0);
 }
 
-// Render Voronoi diagram
+// Render Voronoi diagram using Jump Flooding Algorithm
 void VoronoiDiagram::renderVoronoiDiagram() {
-    const int width = M5.Display.width();
-    const int height = M5.Display.height();
+    // Check if buffers are available
+    if (!jfaBufferA || !jfaBufferB || points.empty()) {
+        // Fallback to traditional method if buffers are not available
+        const int width = screenWidth;
+        const int height = screenHeight;
 
-    // Calculate and draw color for each pixel based on the nearest point
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            // Calculate the nearest point for each pixel
-            int nearestIndex = getNearestPointIndex(x, y);
-
-            // Draw pixel with the color of the nearest point
-            if (nearestIndex != -1) {
-                screenBuffer.drawPixel(x, y, points[nearestIndex].color);
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                int nearestIndex = getNearestPointIndex(x, y);
+                if (nearestIndex != -1) {
+                    screenBuffer.drawPixel(x, y, points[nearestIndex].color);
+                }
             }
         }
+        return;
+    }
+
+    // Execute Jump Flooding Algorithm
+    executeJFA();
+
+    // Render the result to the screen buffer
+    for (int y = 0; y < screenHeight; ++y) {
+        for (int x = 0; x < screenWidth; ++x) {
+            const int idx = y * screenWidth + x;
+            const int pointIdx = jfaBufferA[idx].idx;
+            
+            if (pointIdx >= 0 && pointIdx < static_cast<int>(points.size())) {
+                screenBuffer.drawPixel(x, y, points[pointIdx].color);
+            }
+        }
+    }
+}
+
+// Execute Jump Flooding Algorithm
+void VoronoiDiagram::executeJFA() {
+    const int width = screenWidth;
+    const int height = screenHeight;
+    const size_t numPoints = points.size();
+    
+    // Initialize buffers
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const int idx = y * width + x;
+            jfaBufferA[idx].x = -1;
+            jfaBufferA[idx].y = -1;
+            jfaBufferA[idx].idx = -1;
+        }
+    }
+    
+    // Set seed points
+    for (size_t i = 0; i < numPoints; ++i) {
+        const int x = points[i].x;
+        const int y = points[i].y;
+        
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+            const int idx = y * width + x;
+            jfaBufferA[idx].x = x;
+            jfaBufferA[idx].y = y;
+            jfaBufferA[idx].idx = i;
+        }
+    }
+    
+    // Jump flooding steps
+    SeedPoint* srcBuffer = jfaBufferA;
+    SeedPoint* dstBuffer = jfaBufferB;
+    
+    // Start with step size = width/2 and reduce by half each iteration
+    for (int step = width / 2; step > 0; step /= 2) {
+        // For each pixel
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const int idx = y * width + x;
+                const SeedPoint& current = srcBuffer[idx];
+                
+                // Copy current value to destination buffer
+                dstBuffer[idx] = current;
+                
+                // Check 8 neighboring pixels at distance 'step'
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const int nx = x + dx * step;
+                        const int ny = y + dy * step;
+                        
+                        // Skip if outside screen
+                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                            continue;
+                        }
+                        
+                        const int nidx = ny * width + nx;
+                        const SeedPoint& neighbor = srcBuffer[nidx];
+                        
+                        // Skip if neighbor has no seed point
+                        if (neighbor.idx < 0) {
+                            continue;
+                        }
+                        
+                        // Calculate distance to neighbor's seed point
+                        int dx1 = x - neighbor.x;
+                        int dy1 = y - neighbor.y;
+                        int distSquared1 = dx1 * dx1 + dy1 * dy1;
+                        
+                        // Calculate distance to current seed point (if any)
+                        int distSquared2 = INT_MAX;
+                        if (dstBuffer[idx].idx >= 0) {
+                            int dx2 = x - dstBuffer[idx].x;
+                            int dy2 = y - dstBuffer[idx].y;
+                            distSquared2 = dx2 * dx2 + dy2 * dy2;
+                        }
+                        
+                        // Update if neighbor's seed point is closer
+                        if (distSquared1 < distSquared2) {
+                            dstBuffer[idx] = neighbor;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Swap buffers for next iteration
+        std::swap(srcBuffer, dstBuffer);
+    }
+    
+    // Ensure final result is in jfaBufferA
+    if (srcBuffer != jfaBufferA) {
+        memcpy(jfaBufferA, srcBuffer, screenSize * sizeof(SeedPoint));
     }
 }
 

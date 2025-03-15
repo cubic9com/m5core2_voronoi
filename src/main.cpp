@@ -18,15 +18,14 @@ static bool setupApplication() {
 
     // Display settings (landscape orientation)
     M5.Display.setRotation(1);
+    M5.Display.setColorDepth(8);  // Set to 8-bit color depth
     M5.Display.startWrite();
 
-    // Create off-screen buffer
-    screenBuffer.setPsram(true);
-    
     const int width = M5.Display.width();
     const int height = M5.Display.height();
     
     // Create sprite
+    screenBuffer.setColorDepth(8);  // Set to 8-bit color depth
     screenBuffer.createSprite(width, height);
 
     // Initialize sound manager and play startup sound

@@ -131,7 +131,7 @@ void TaskManager::voronoiTaskFunction(void* args) {
     TaskManager* self = static_cast<TaskManager*>(args);
     
     // Drawing interval (milliseconds)
-    static constexpr uint32_t DRAW_INTERVAL_MS = 200;
+    static constexpr uint32_t DRAW_INTERVAL_MS = 100;
     
     // Task main loop
     for (;;) {

@@ -3,7 +3,37 @@
 #include <algorithm>
 #include <esp_log.h>
 
+// Custom clamp function (since std::clamp requires C++17)
+template<typename T>
+T clamp(const T& value, const T& min, const T& max) {
+    return (value < min) ? min : ((value > max) ? max : value);
+}
+
 static const char* TAG = "VoronoiDiagram";
+
+// Define color palette
+const uint16_t VoronoiDiagram::COLOR_PALETTE[20] = {
+    0xED79, // RGB(238, 175, 206)
+    0xFDB8, // RGB(251, 180, 196)
+    0xFDB6, // RGB(250, 182, 181)
+    0xFE76, // RGB(253, 205, 183)
+    0xFED6, // RGB(251, 216, 176)
+    0xFF35, // RGB(254, 230, 170)
+    0xFF95, // RGB(252, 241, 175)
+    0xFFF6, // RGB(254, 255, 179)
+    0xEFD6, // RGB(238, 250, 178)
+    0xE7F6, // RGB(230, 245, 176)
+    0xDFB8, // RGB(217, 246, 192)
+    0xCF58, // RGB(204, 234, 196)
+    0xC759, // RGB(192, 235, 205)
+    0xB71B, // RGB(179, 226, 216)
+    0xB6FB, // RGB(180, 221, 223)
+    0xB6BB, // RGB(180, 215, 221)
+    0xB69C, // RGB(181, 210, 224)
+    0xB67C, // RGB(179, 206, 227)
+    0xB61B, // RGB(180, 194, 221)
+    0xB5BB  // RGB(178, 182, 217)
+};
 
 // Mutex lock class using RAII pattern
 class MutexLock {
@@ -46,26 +76,14 @@ VoronoiDiagram::~VoronoiDiagram() {
     freeJFABuffers();
 }
 
-// Initialize JFA buffers in PSRAM
+// Initialize JFA buffers in internal SRAM
 void VoronoiDiagram::initJFABuffers() {
     // Free existing buffers if any
     freeJFABuffers();
     
-    // Allocate buffers in PSRAM
-    jfaBufferA = (SeedPoint*)heap_caps_malloc(screenSize * sizeof(SeedPoint), MALLOC_CAP_SPIRAM);
-    jfaBufferB = (SeedPoint*)heap_caps_malloc(screenSize * sizeof(SeedPoint), MALLOC_CAP_SPIRAM);
-    
-    if (!jfaBufferA || !jfaBufferB) {
-        ESP_LOGE(TAG, "Failed to allocate JFA buffers in PSRAM");
-        // Fallback to regular memory if PSRAM allocation fails
-        freeJFABuffers();
-        jfaBufferA = (SeedPoint*)malloc(screenSize * sizeof(SeedPoint));
-        jfaBufferB = (SeedPoint*)malloc(screenSize * sizeof(SeedPoint));
-        
-        if (!jfaBufferA || !jfaBufferB) {
-            ESP_LOGE(TAG, "Failed to allocate JFA buffers in regular memory");
-        }
-    }
+    // Try to allocate buffers in internal SRAM (DMA capable memory for faster access)
+    jfaBufferA = (SeedPoint*)heap_caps_malloc(screenSize * sizeof(SeedPoint), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    jfaBufferB = (SeedPoint*)heap_caps_malloc(screenSize * sizeof(SeedPoint), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
 }
 
 // Free JFA buffers
@@ -84,8 +102,8 @@ void VoronoiDiagram::freeJFABuffers() {
 // Add a point
 void VoronoiDiagram::addPoint(int x, int y) {
     // Adjust coordinates if outside screen
-    x = std::clamp(x, 0, (int)M5.Display.width());
-    y = std::clamp(y, 0, (int)M5.Display.height());
+    x = clamp(x, 0, (int)M5.Display.width());
+    y = clamp(y, 0, (int)M5.Display.height());
 
     // If exceeding maximum number of points, remove the first point
     if (points.size() >= MAX_POINT_COUNT) {
@@ -93,7 +111,7 @@ void VoronoiDiagram::addPoint(int x, int y) {
     }
 
     // Randomly select a color from the palette
-    const uint16_t color = COLOR_PALETTE[esp_random() % std::size(COLOR_PALETTE)];
+    const uint16_t color = COLOR_PALETTE[esp_random() % (sizeof(COLOR_PALETTE) / sizeof(COLOR_PALETTE[0]))];
 
     // Add new point to the list
     points.push_back({x, y, color});
@@ -309,8 +327,8 @@ void VoronoiDiagram::applyRepulsiveForce() {
     
     // Apply calculated forces to move points
     for (size_t i = 0; i < numPoints; ++i) {
-        points[i].x = std::clamp((int)(points[i].x + forces[i].first), 0, displayWidth);
-        points[i].y = std::clamp((int)(points[i].y + forces[i].second), 0, displayHeight);
+        points[i].x = clamp((int)(points[i].x + forces[i].first), 0, displayWidth);
+        points[i].y = clamp((int)(points[i].y + forces[i].second), 0, displayHeight);
     }
 }
 

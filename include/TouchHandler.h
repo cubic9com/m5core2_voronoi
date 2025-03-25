@@ -1,6 +1,7 @@
 #pragma once
 
 #include <M5Unified.h>
+#include <Arduino.h>
 #include "VoronoiDiagram.h"
 #include "SoundManager.h"
 

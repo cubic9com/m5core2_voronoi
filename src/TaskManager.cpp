@@ -8,14 +8,14 @@ TaskManager::TaskManager(VoronoiDiagram& voronoi, TouchHandler& touch)
 // Destructor
 TaskManager::~TaskManager() {
     // Delete tasks if they are running
-    if (mainTaskHandle != nullptr) {
-        vTaskDelete(mainTaskHandle);
-        mainTaskHandle = nullptr;
+    if (touchTaskHandle != nullptr) {
+        vTaskDelete(touchTaskHandle);
+        touchTaskHandle = nullptr;
     }
     
-    if (voronoiTaskHandle != nullptr) {
-        vTaskDelete(voronoiTaskHandle);
-        voronoiTaskHandle = nullptr;
+    if (drawTaskHandle != nullptr) {
+        vTaskDelete(drawTaskHandle);
+        drawTaskHandle = nullptr;
     }
 
     // Delete mutex if it exists
@@ -30,49 +30,63 @@ void TaskManager::initializeTasks() {
     // Task stack size
     static constexpr uint32_t TASK_STACK_SIZE = 4096;
     
-    // Create main task (runs on CPU0)
-    BaseType_t mainTaskResult = xTaskCreatePinnedToCore(
-        &TaskManager::mainTaskFunction,
-        "task1-main",
+    // Create Touch task (runs on CPU0)
+    BaseType_t touchTaskResult = xTaskCreatePinnedToCore(
+        &TaskManager::touchTaskFunction,
+        "TouchTask",
         TASK_STACK_SIZE,
         this,
         2,  // Higher priority
-        &mainTaskHandle,
+        &touchTaskHandle,
         0   // Run on CPU0
     );
     
     // If task creation fails
-    if (mainTaskResult != pdPASS) {
+    if (touchTaskResult != pdPASS) {
         // Error handling (in a real application, would log or perform recovery)
+        Serial.println("Failed to create Touch task");
         return;
     }
     
     // Verify created task handle
-    configASSERT(mainTaskHandle);
+    if (touchTaskHandle == nullptr) {
+        Serial.println("Touch task handle is null");
+        return;
+    }
 
-    // Create Voronoi task (runs on CPU1)
-    BaseType_t voronoiTaskResult = xTaskCreatePinnedToCore(
-        &TaskManager::voronoiTaskFunction,
-        "task2-voronoi",
+    // Create Draw task (runs on CPU1)
+    BaseType_t drawTaskResult = xTaskCreatePinnedToCore(
+        &TaskManager::drawTaskFunction,
+        "DrawTask",
         TASK_STACK_SIZE,
         this,
         1,  // Lower priority
-        &voronoiTaskHandle,
+        &drawTaskHandle,
         1   // Run on CPU1
     );
     
     // If task creation fails
-    if (voronoiTaskResult != pdPASS) {
-        // Error handling (delete main task to free resources)
-        if (mainTaskHandle != nullptr) {
-            vTaskDelete(mainTaskHandle);
-            mainTaskHandle = nullptr;
+    if (drawTaskResult != pdPASS) {
+        // Error handling (delete Touch task to free resources)
+        Serial.println("Failed to create Draw task");
+        if (touchTaskHandle != nullptr) {
+            vTaskDelete(touchTaskHandle);
+            touchTaskHandle = nullptr;
         }
         return;
     }
     
     // Verify created task handle
-    configASSERT(voronoiTaskHandle);
+    if (drawTaskHandle == nullptr) {
+        Serial.println("Draw task handle is null");
+        if (touchTaskHandle != nullptr) {
+            vTaskDelete(touchTaskHandle);
+            touchTaskHandle = nullptr;
+        }
+        return;
+    }
+    
+    Serial.println("Tasks initialized successfully");
 }
 
 // Create mutex for drawing
@@ -88,23 +102,26 @@ SemaphoreHandle_t TaskManager::createDrawMutex() {
     
     // Verify mutex creation
     if (drawMutex == nullptr) {
+        Serial.println("Failed to create draw mutex");
         return nullptr;
     }
     
-    configASSERT(drawMutex);
     return drawMutex;
 }
 
-// Main task function (static)
-void TaskManager::mainTaskFunction(void* args) {
+// Touch task function (static)
+void TaskManager::touchTaskFunction(void* args) {
     // Early return if args is null
     if (args == nullptr) {
+        Serial.println("TouchTask args is null");
         vTaskDelete(nullptr);
         return;
     }
     
     // Get this pointer
     TaskManager* self = static_cast<TaskManager*>(args);
+    
+    Serial.println("TouchTask started");
     
     // Task main loop
     for (;;) {
@@ -119,10 +136,11 @@ void TaskManager::mainTaskFunction(void* args) {
     vTaskDelete(nullptr);
 }
 
-// Voronoi task function (static)
-void TaskManager::voronoiTaskFunction(void* args) {
+// Draw task function (static)
+void TaskManager::drawTaskFunction(void* args) {
     // Early return if args is null
     if (args == nullptr) {
+        Serial.println("Draw task args is null");
         vTaskDelete(nullptr);
         return;
     }
@@ -131,7 +149,9 @@ void TaskManager::voronoiTaskFunction(void* args) {
     TaskManager* self = static_cast<TaskManager*>(args);
     
     // Drawing interval (milliseconds)
-    static constexpr uint32_t DRAW_INTERVAL_MS = 25;
+    static constexpr uint32_t DRAW_INTERVAL_MS = 10;
+    
+    Serial.println("Draw task started");
     
     // Task main loop
     for (;;) {

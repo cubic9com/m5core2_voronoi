@@ -10,6 +10,12 @@ static M5Canvas screenBuffer;
 // Global sound manager
 static SoundManager soundManager;
 
+// Global objects
+VoronoiDiagram* voronoiDiagram = nullptr;
+TouchHandler* touchHandler = nullptr;
+TaskManager* taskManager = nullptr;
+SemaphoreHandle_t drawMutex = nullptr;
+
 // Application setup
 static bool setupApplication() {
     // Initialize M5Stack
@@ -35,8 +41,8 @@ static bool setupApplication() {
     return true;
 }
 
-// Application entry point
-extern "C" void app_main() {
+// Arduino setup function
+void setup() {
     // Initial setup
     if (!setupApplication()) {
         // Exit if setup fails
@@ -44,7 +50,7 @@ extern "C" void app_main() {
     }
 
     // Create mutex for drawing
-    SemaphoreHandle_t drawMutex = xSemaphoreCreateMutex();
+    drawMutex = xSemaphoreCreateMutex();
     
     // If mutex creation fails
     if (drawMutex == nullptr) {
@@ -54,21 +60,20 @@ extern "C" void app_main() {
     configASSERT(drawMutex);
 
     // Create Voronoi diagram
-    VoronoiDiagram voronoiDiagram(screenBuffer, drawMutex);
+    voronoiDiagram = new VoronoiDiagram(screenBuffer, drawMutex);
 
     // Create touch handler
-    TouchHandler touchHandler(voronoiDiagram, soundManager);
+    touchHandler = new TouchHandler(*voronoiDiagram, soundManager);
 
     // Create task manager
-    TaskManager taskManager(voronoiDiagram, touchHandler);
+    taskManager = new TaskManager(*voronoiDiagram, *touchHandler);
 
     // Initialize tasks
-    taskManager.initializeTasks();
+    taskManager->initializeTasks();
+}
 
-    // Main thread waits idle (checking alive every 1 second)
-    static constexpr uint32_t MAIN_THREAD_DELAY_MS = 1000;
-    
-    while (true) {
-        vTaskDelay(MAIN_THREAD_DELAY_MS / portTICK_PERIOD_MS);
-    }
+// Arduino loop function
+void loop() {
+  // Main loop does nothing (all processing is done in separate tasks)
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
 }

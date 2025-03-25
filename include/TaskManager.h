@@ -1,8 +1,6 @@
 #pragma once
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
+#include <Arduino.h>
 #include "VoronoiDiagram.h"
 #include "TouchHandler.h"
 #include "SoundManager.h"
@@ -30,15 +28,15 @@ private:
     TouchHandler& touchHandler;
 
     // Task handles
-    TaskHandle_t mainTaskHandle = nullptr;
-    TaskHandle_t voronoiTaskHandle = nullptr;
+    TaskHandle_t touchTaskHandle = nullptr;
+    TaskHandle_t drawTaskHandle = nullptr;
 
     // Mutex for drawing
     SemaphoreHandle_t drawMutex = nullptr;
 
     // Main task function (static)
-    static void mainTaskFunction(void* args);
+    static void touchTaskFunction(void* args);
 
     // Voronoi task function (static)
-    static void voronoiTaskFunction(void* args);
+    static void drawTaskFunction(void* args);
 };

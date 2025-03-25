@@ -1,6 +1,7 @@
 #pragma once
 
 #include <M5Unified.h>
+#include <Arduino.h>
 
 // Class for managing sound effects
 class SoundManager {
@@ -34,5 +35,5 @@ private:
     // Startup sound settings
     static constexpr float STARTUP_FREQUENCY = 659.26F;
     static constexpr uint32_t STARTUP_DURATION = 50U;
-    static constexpr uint32_t STARTUP_DELAY = 15U;
+    static constexpr uint32_t STARTUP_DELAY = 150U;
 };

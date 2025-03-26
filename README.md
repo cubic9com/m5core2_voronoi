@@ -19,7 +19,7 @@ m5core2_voronoi プロジェクトは、インタラクティブにボロノイ�
 1. Click `USER CUSTOM` in the lower left corner.
 1. Log in to the M5Stack Community.
 1. Click the `Share Burn` button.
-1. Enter `15K4ORoKNNjBNYHw` in the `Share Code` field.
+1. Enter `4ttapIWdvEU0IvJE` in the `Share Code` field.
 1. Click the lightning icon :zap: .
 
 \[日本語\]
@@ -29,7 +29,7 @@ m5core2_voronoi プロジェクトは、インタラクティブにボロノイ�
 1. 左下隅の `USER CUSTOM` をクリックします。
 1. M5Stack Communityにログインします。
 1. `Share Burn` ボタンをクリックします。
-1. `Share Code` フィールドに `15K4ORoKNNjBNYHw` と入力します。
+1. `Share Code` フィールドに `4ttapIWdvEU0IvJE` と入力します。
 1. 稲妻アイコン :zap: をクリックします。
 
 # Installation for developers

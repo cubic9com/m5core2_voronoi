@@ -89,26 +89,6 @@ void TaskManager::initializeTasks() {
     Serial.println("Tasks initialized successfully");
 }
 
-// Create mutex for drawing
-SemaphoreHandle_t TaskManager::createDrawMutex() {
-    // Delete mutex if it already exists
-    if (drawMutex != nullptr) {
-        vSemaphoreDelete(drawMutex);
-        drawMutex = nullptr;
-    }
-    
-    // Create new mutex
-    drawMutex = xSemaphoreCreateMutex();
-    
-    // Verify mutex creation
-    if (drawMutex == nullptr) {
-        Serial.println("Failed to create draw mutex");
-        return nullptr;
-    }
-    
-    return drawMutex;
-}
-
 // Touch task function (static)
 void TaskManager::touchTaskFunction(void* args) {
     // Early return if args is null

@@ -17,9 +17,6 @@ public:
     // Initialize tasks
     void initializeTasks();
 
-    // Create mutex for drawing
-    SemaphoreHandle_t createDrawMutex();
-
 private:
     // Voronoi diagram
     VoronoiDiagram& voronoiDiagram;

@@ -105,16 +105,18 @@ void VoronoiDiagram::addPoint(int x, int y) {
     x = clamp(x, 0, (int)M5.Display.width());
     y = clamp(y, 0, (int)M5.Display.height());
 
-    // If exceeding maximum number of points, remove the first point
-    if (points.size() >= MAX_POINT_COUNT) {
-        points.erase(points.begin());
-    }
-
     // Randomly select a color from the palette
     const uint16_t color = COLOR_PALETTE[esp_random() % (sizeof(COLOR_PALETTE) / sizeof(COLOR_PALETTE[0]))];
 
-    // Add new point to the list
-    points.push_back({x, y, color});
+    // Use circular buffer approach for better performance
+    if (points.size() < MAX_POINT_COUNT) {
+        // Add new point if not at capacity
+        points.push_back({x, y, color});
+    } else {
+        // Overwrite oldest point (circular buffer)
+        points[currentPointIndex] = {x, y, color};
+        currentPointIndex = (currentPointIndex + 1) % MAX_POINT_COUNT;
+    }
 
     // Draw a white circle at the point position
     MutexLock lock(drawMutex);
@@ -193,14 +195,8 @@ void VoronoiDiagram::executeJFA() {
     const size_t numPoints = points.size();
     
     // Initialize buffers
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const int idx = y * width + x;
-            jfaBufferA[idx].x = -1;
-            jfaBufferA[idx].y = -1;
-            jfaBufferA[idx].idx = -1;
-        }
-    }
+    const size_t bufferSize = screenSize * sizeof(SeedPoint);
+    memset(jfaBufferA, -1, bufferSize);
     
     // Set seed points
     for (size_t i = 0; i < numPoints; ++i) {
@@ -223,25 +219,42 @@ void VoronoiDiagram::executeJFA() {
     for (int step = width / 2; step > 0; step /= 2) {
         // For each pixel
         for (int y = 0; y < height; ++y) {
+            const int rowOffset = y * width;
+            
             for (int x = 0; x < width; ++x) {
-                const int idx = y * width + x;
-                const SeedPoint& current = srcBuffer[idx];
+                const int idx = rowOffset + x;
                 
                 // Copy current value to destination buffer
-                dstBuffer[idx] = current;
+                dstBuffer[idx] = srcBuffer[idx];
+                
+                // Get current best distance (if any)
+                int bestDistSquared = INT_MAX;
+                if (dstBuffer[idx].idx >= 0) {
+                    const int dx = x - dstBuffer[idx].x;
+                    const int dy = y - dstBuffer[idx].y;
+                    bestDistSquared = dx * dx + dy * dy;
+                }
                 
                 // Check 8 neighboring pixels at distance 'step'
                 for (int dy = -1; dy <= 1; ++dy) {
+                    const int ny = y + dy * step;
+                    
+                    // Skip if outside screen
+                    if (ny < 0 || ny >= height) {
+                        continue;
+                    }
+                    
+                    const int neighborRowOffset = ny * width;
+                    
                     for (int dx = -1; dx <= 1; ++dx) {
                         const int nx = x + dx * step;
-                        const int ny = y + dy * step;
                         
                         // Skip if outside screen
-                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                        if (nx < 0 || nx >= width) {
                             continue;
                         }
                         
-                        const int nidx = ny * width + nx;
+                        const int nidx = neighborRowOffset + nx;
                         const SeedPoint& neighbor = srcBuffer[nidx];
                         
                         // Skip if neighbor has no seed point
@@ -250,20 +263,13 @@ void VoronoiDiagram::executeJFA() {
                         }
                         
                         // Calculate distance to neighbor's seed point
-                        int dx1 = x - neighbor.x;
-                        int dy1 = y - neighbor.y;
-                        int distSquared1 = dx1 * dx1 + dy1 * dy1;
-                        
-                        // Calculate distance to current seed point (if any)
-                        int distSquared2 = INT_MAX;
-                        if (dstBuffer[idx].idx >= 0) {
-                            int dx2 = x - dstBuffer[idx].x;
-                            int dy2 = y - dstBuffer[idx].y;
-                            distSquared2 = dx2 * dx2 + dy2 * dy2;
-                        }
+                        const int dx1 = x - neighbor.x;
+                        const int dy1 = y - neighbor.y;
+                        const int distSquared = dx1 * dx1 + dy1 * dy1;
                         
                         // Update if neighbor's seed point is closer
-                        if (distSquared1 < distSquared2) {
+                        if (distSquared < bestDistSquared) {
+                            bestDistSquared = distSquared;
                             dstBuffer[idx] = neighbor;
                         }
                     }
@@ -304,17 +310,22 @@ void VoronoiDiagram::applyRepulsiveForce() {
     for (size_t i = 0; i < numPoints; ++i) {
         for (size_t j = i + 1; j < numPoints; ++j) {
             // Calculate distance and direction between points
-            int dx = points[i].x - points[j].x;
-            int dy = points[i].y - points[j].y;
-            float distSquared = dx * dx + dy * dy;
+            const int dx = points[i].x - points[j].x;
+            const int dy = points[i].y - points[j].y;
+            const float distSquared = dx * dx + dy * dy;
             
             // Apply repulsive force if within certain radius
             if (distSquared > 0 && distSquared < radiusSquared) {
-                float dist = sqrtf(distSquared); // Calculate square root only here
-                float force = REPULSION_STRENGTH / distSquared; // Divide by square of distance
+                // Optimized force calculation: avoid extra division
+                // Original: force * (dx/dist) = (STRENGTH/distSquared) * (dx/dist) 
+                //         = STRENGTH * dx / (distSquared * dist)
+                //         = STRENGTH * dx / dist^3
+                // dist^3 = distSquared * sqrt(distSquared)
+                const float distCubed = distSquared * sqrtf(distSquared);
+                const float forceFactor = REPULSION_STRENGTH / distCubed;
                 
-                float fx = force * (dx / dist);
-                float fy = force * (dy / dist);
+                const float fx = forceFactor * dx;
+                const float fy = forceFactor * dy;
                 
                 // Apply force to both points (action-reaction)
                 forces[i].first += fx;

@@ -61,6 +61,9 @@ private:
 
     // List of points
     std::vector<Point> points;
+    
+    // Current point index for circular overwrite
+    size_t currentPointIndex = 0;
 
     // Drawing buffer
     M5Canvas& screenBuffer;

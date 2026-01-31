@@ -23,7 +23,4 @@ private:
 
     // Initial touch position (set to invalid coordinates)
     m5::touch_detail_t initialTouchPosition = {};
-
-    // Drag threshold
-    static constexpr int DRAG_THRESHOLD = 10;
 };

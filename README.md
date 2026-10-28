@@ -1,11 +1,11 @@
 
 # Overview / 概要
 
-The m5core2_voronoi project is an interactive Voronoi diagram renderer for the [M5Stack Core 2](https://docs.m5stack.com/#/en/core/core2) .
+A Voronoi diagram you can touch. The m5core2_voronoi project is an interactive Voronoi diagram renderer for the [M5Stack Core 2](https://docs.m5stack.com/#/en/core/core2), turning your taps into living mosaic patterns.
 
 \[日本語\]
 
-m5core2_voronoi プロジェクトは、インタラクティブにボロノイ図を描画する [M5Stack Core 2](https://docs.m5stack.com/#/en/core/core2) 用のソフトウェアです。
+触れられるボロノイ図。「m5core2_voronoi」は、[M5Stack Core 2](https://docs.m5stack.com/#/en/core/core2)向けのインタラクティブなボロノイ図描画プロジェクトです。画面をタップすると、それが生き生きとしたモザイク模様へと変化します。
 
 # Video / 動画
 

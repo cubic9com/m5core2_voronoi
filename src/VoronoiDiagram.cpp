@@ -64,39 +64,36 @@ VoronoiDiagram::VoronoiDiagram(M5Canvas& buffer, SemaphoreHandle_t mutex)
     // Get screen dimensions
     screenWidth = M5.Display.width();
     screenHeight = M5.Display.height();
-    screenSize = screenWidth * screenHeight;
     
-    // Initialize JFA buffers in PSRAM
-    initJFABuffers();
+    // Probe the canvas pixel values of the palette colors, so the
+    // renderer can write pixels directly into the canvas buffer
+    initPaletteCanvasColors();
 }
 
 // Destructor
 VoronoiDiagram::~VoronoiDiagram() {
-    // Free JFA buffers
-    freeJFABuffers();
 }
 
-// Initialize JFA buffers in internal SRAM
-void VoronoiDiagram::initJFABuffers() {
-    // Free existing buffers if any
-    freeJFABuffers();
+// Probe the canvas pixel values of the palette colors
+void VoronoiDiagram::initPaletteCanvasColors() {
+    paletteCanvasColorsReady = false;
     
-    // Try to allocate buffers in internal SRAM (DMA capable memory for faster access)
-    jfaBufferA = (SeedPoint*)heap_caps_malloc(screenSize * sizeof(SeedPoint), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    jfaBufferB = (SeedPoint*)heap_caps_malloc(screenSize * sizeof(SeedPoint), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-}
-
-// Free JFA buffers
-void VoronoiDiagram::freeJFABuffers() {
-    if (jfaBufferA) {
-        free(jfaBufferA);
-        jfaBufferA = nullptr;
+    uint8_t* canvasData = reinterpret_cast<uint8_t*>(screenBuffer.getBuffer());
+    if (!canvasData) {
+        ESP_LOGW(TAG, "Canvas buffer unavailable, using drawPixel rendering");
+        return;
     }
     
-    if (jfaBufferB) {
-        free(jfaBufferB);
-        jfaBufferB = nullptr;
+    // drawPixel() converts an RGB565 color into the canvas pixel format.
+    // Draw one pixel per palette color and read the stored values back,
+    // so the direct buffer writes below produce exactly the same pixels
+    // without depending on the details of the 8-bit pixel format.
+    // (The probed pixels are overwritten by the first full rendering.)
+    for (size_t i = 0; i < PALETTE_COLOR_COUNT; ++i) {
+        screenBuffer.drawPixel(static_cast<int>(i), 0, COLOR_PALETTE[i]);
+        paletteCanvasColors[i] = canvasData[i];
     }
+    paletteCanvasColorsReady = true;
 }
 
 // Add a point
@@ -106,24 +103,31 @@ void VoronoiDiagram::addPoint(int x, int y) {
     y = clamp(y, 0, (int)M5.Display.height());
 
     // Randomly select a color from the palette
-    const uint16_t color = COLOR_PALETTE[esp_random() % (sizeof(COLOR_PALETTE) / sizeof(COLOR_PALETTE[0]))];
+    const size_t paletteIndex = esp_random() % PALETTE_COLOR_COUNT;
+    const uint16_t color = COLOR_PALETTE[paletteIndex];
+    const uint8_t canvasColor = paletteCanvasColorsReady ? paletteCanvasColors[paletteIndex] : 0;
 
-    // Use circular buffer approach for better performance
-    if (points.size() < MAX_POINT_COUNT) {
-        // Add new point if not at capacity
-        points.push_back({x, y, color});
-    } else {
-        // Overwrite oldest point (circular buffer)
-        points[currentPointIndex] = {x, y, color};
-        currentPointIndex = (currentPointIndex + 1) % MAX_POINT_COUNT;
-    }
-
-    // Draw a white circle at the point position
+    // Hold the lock for the whole update: the draw task reads the point
+    // list, so it must not change while being rendered
     MutexLock lock(drawMutex);
     if (!lock.isLocked()) {
         return;
     }
-    
+
+    // Use circular buffer approach for better performance
+    if (points.size() < MAX_POINT_COUNT) {
+        // Add new point if not at capacity
+        points.push_back({x, y, color, canvasColor});
+    } else {
+        // Overwrite oldest point (circular buffer)
+        points[currentPointIndex] = {x, y, color, canvasColor};
+        currentPointIndex = (currentPointIndex + 1) % MAX_POINT_COUNT;
+    }
+
+    // The point set has changed
+    needsRedraw = true;
+
+    // Draw a white circle at the point position
     M5.Display.fillCircle(x, y, 3, WHITE);
 }
 
@@ -141,7 +145,13 @@ void VoronoiDiagram::draw() {
     }
 
     // Apply repulsive force to move points
-    applyRepulsiveForce();
+    const bool moved = applyRepulsiveForce();
+
+    // Skip frames in which nothing changed: the displayed image would
+    // be identical, so rendering and transferring it again is wasted work
+    if (!moved && !needsRedraw) {
+        return;
+    }
 
     // Draw Voronoi diagram
     renderVoronoiDiagram();
@@ -151,18 +161,20 @@ void VoronoiDiagram::draw() {
 
     // Push off-screen buffer to display
     screenBuffer.pushSprite(&M5.Display, 0, 0);
+
+    needsRedraw = false;
 }
 
-// Render Voronoi diagram using Jump Flooding Algorithm
+// Render Voronoi diagram: assign each pixel the color of its nearest point
 void VoronoiDiagram::renderVoronoiDiagram() {
-    // Check if buffers are available
-    if (!jfaBufferA || !jfaBufferB || points.empty()) {
-        // Fallback to traditional method if buffers are not available
-        const int width = screenWidth;
-        const int height = screenHeight;
-
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
+    uint8_t* canvasData = paletteCanvasColorsReady
+        ? reinterpret_cast<uint8_t*>(screenBuffer.getBuffer())
+        : nullptr;
+    
+    // Fallback to drawPixel if direct buffer access is unavailable
+    if (!canvasData) {
+        for (int y = 0; y < screenHeight; ++y) {
+            for (int x = 0; x < screenWidth; ++x) {
                 int nearestIndex = getNearestPointIndex(x, y);
                 if (nearestIndex != -1) {
                     screenBuffer.drawPixel(x, y, points[nearestIndex].color);
@@ -171,119 +183,43 @@ void VoronoiDiagram::renderVoronoiDiagram() {
         }
         return;
     }
-
-    // Execute Jump Flooding Algorithm
-    executeJFA();
-
-    // Render the result to the screen buffer
+    
+    // Copy the point data into local arrays (at most MAX_POINT_COUNT
+    // entries, always cache resident)
+    const size_t count = points.size();
+    int pointX[MAX_POINT_COUNT];
+    int pointY[MAX_POINT_COUNT];
+    uint8_t pointColor[MAX_POINT_COUNT];
+    for (size_t i = 0; i < count; ++i) {
+        pointX[i] = points[i].x;
+        pointY[i] = points[i].y;
+        pointColor[i] = points[i].canvasColor;
+    }
+    
+    // For each pixel, find the nearest point and write its color byte
+    // directly into the canvas buffer
     for (int y = 0; y < screenHeight; ++y) {
+        // The vertical distance to each point is constant within a row
+        int distYSquared[MAX_POINT_COUNT];
+        for (size_t i = 0; i < count; ++i) {
+            const int dy = y - pointY[i];
+            distYSquared[i] = dy * dy;
+        }
+        
+        uint8_t* row = canvasData + y * screenWidth;
         for (int x = 0; x < screenWidth; ++x) {
-            const int idx = y * screenWidth + x;
-            const int pointIdx = jfaBufferA[idx].idx;
-            
-            if (pointIdx >= 0 && pointIdx < static_cast<int>(points.size())) {
-                screenBuffer.drawPixel(x, y, points[pointIdx].color);
-            }
-        }
-    }
-}
-
-// Execute Jump Flooding Algorithm
-void VoronoiDiagram::executeJFA() {
-    const int width = screenWidth;
-    const int height = screenHeight;
-    const size_t numPoints = points.size();
-    
-    // Initialize buffers
-    const size_t bufferSize = screenSize * sizeof(SeedPoint);
-    memset(jfaBufferA, -1, bufferSize);
-    
-    // Set seed points
-    for (size_t i = 0; i < numPoints; ++i) {
-        const int x = points[i].x;
-        const int y = points[i].y;
-        
-        if (x >= 0 && x < width && y >= 0 && y < height) {
-            const int idx = y * width + x;
-            jfaBufferA[idx].x = x;
-            jfaBufferA[idx].y = y;
-            jfaBufferA[idx].idx = i;
-        }
-    }
-    
-    // Jump flooding steps
-    SeedPoint* srcBuffer = jfaBufferA;
-    SeedPoint* dstBuffer = jfaBufferB;
-    
-    // Start with step size = width/2 and reduce by half each iteration
-    for (int step = width / 2; step > 0; step /= 2) {
-        // For each pixel
-        for (int y = 0; y < height; ++y) {
-            const int rowOffset = y * width;
-            
-            for (int x = 0; x < width; ++x) {
-                const int idx = rowOffset + x;
-                
-                // Copy current value to destination buffer
-                dstBuffer[idx] = srcBuffer[idx];
-                
-                // Get current best distance (if any)
-                int bestDistSquared = INT_MAX;
-                if (dstBuffer[idx].idx >= 0) {
-                    const int dx = x - dstBuffer[idx].x;
-                    const int dy = y - dstBuffer[idx].y;
-                    bestDistSquared = dx * dx + dy * dy;
-                }
-                
-                // Check 8 neighboring pixels at distance 'step'
-                for (int dy = -1; dy <= 1; ++dy) {
-                    const int ny = y + dy * step;
-                    
-                    // Skip if outside screen
-                    if (ny < 0 || ny >= height) {
-                        continue;
-                    }
-                    
-                    const int neighborRowOffset = ny * width;
-                    
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        const int nx = x + dx * step;
-                        
-                        // Skip if outside screen
-                        if (nx < 0 || nx >= width) {
-                            continue;
-                        }
-                        
-                        const int nidx = neighborRowOffset + nx;
-                        const SeedPoint& neighbor = srcBuffer[nidx];
-                        
-                        // Skip if neighbor has no seed point
-                        if (neighbor.idx < 0) {
-                            continue;
-                        }
-                        
-                        // Calculate distance to neighbor's seed point
-                        const int dx1 = x - neighbor.x;
-                        const int dy1 = y - neighbor.y;
-                        const int distSquared = dx1 * dx1 + dy1 * dy1;
-                        
-                        // Update if neighbor's seed point is closer
-                        if (distSquared < bestDistSquared) {
-                            bestDistSquared = distSquared;
-                            dstBuffer[idx] = neighbor;
-                        }
-                    }
+            int nearestIndex = 0;
+            int nearestDistSquared = INT_MAX;
+            for (size_t i = 0; i < count; ++i) {
+                const int dx = x - pointX[i];
+                const int distSquared = dx * dx + distYSquared[i];
+                if (distSquared < nearestDistSquared) {
+                    nearestDistSquared = distSquared;
+                    nearestIndex = static_cast<int>(i);
                 }
             }
+            row[x] = pointColor[nearestIndex];
         }
-        
-        // Swap buffers for next iteration
-        std::swap(srcBuffer, dstBuffer);
-    }
-    
-    // Ensure final result is in jfaBufferA
-    if (srcBuffer != jfaBufferA) {
-        memcpy(jfaBufferA, srcBuffer, screenSize * sizeof(SeedPoint));
     }
 }
 
@@ -297,16 +233,18 @@ void VoronoiDiagram::renderPoints() {
     }
 }
 
-// Apply repulsive force to move points
-void VoronoiDiagram::applyRepulsiveForce() {
+// Apply repulsive force to move points (returns true if any point moved)
+bool VoronoiDiagram::applyRepulsiveForce() {
     const size_t numPoints = points.size();
     const float radiusSquared = REPULSION_RADIUS * REPULSION_RADIUS;
-    const int displayWidth = M5.Display.width();
-    const int displayHeight = M5.Display.height();
+    
+    // Clear the force accumulators (fixed-size member arrays, no allocation)
+    for (size_t i = 0; i < numPoints; ++i) {
+        forceX[i] = 0.0f;
+        forceY[i] = 0.0f;
+    }
     
     // Calculate forces for each point
-    std::vector<std::pair<float, float>> forces(numPoints, {0.0f, 0.0f});
-    
     for (size_t i = 0; i < numPoints; ++i) {
         for (size_t j = i + 1; j < numPoints; ++j) {
             // Calculate distance and direction between points
@@ -328,19 +266,27 @@ void VoronoiDiagram::applyRepulsiveForce() {
                 const float fy = forceFactor * dy;
                 
                 // Apply force to both points (action-reaction)
-                forces[i].first += fx;
-                forces[i].second += fy;
-                forces[j].first -= fx;
-                forces[j].second -= fy;
+                forceX[i] += fx;
+                forceY[i] += fy;
+                forceX[j] -= fx;
+                forceY[j] -= fy;
             }
         }
     }
     
-    // Apply calculated forces to move points
+    // Apply calculated forces to move points, tracking whether any
+    // point actually changed its (integer) position
+    bool moved = false;
     for (size_t i = 0; i < numPoints; ++i) {
-        points[i].x = clamp((int)(points[i].x + forces[i].first), 0, displayWidth);
-        points[i].y = clamp((int)(points[i].y + forces[i].second), 0, displayHeight);
+        const int newX = clamp((int)(points[i].x + forceX[i]), 0, screenWidth);
+        const int newY = clamp((int)(points[i].y + forceY[i]), 0, screenHeight);
+        if (newX != points[i].x || newY != points[i].y) {
+            points[i].x = newX;
+            points[i].y = newY;
+            moved = true;
+        }
     }
+    return moved;
 }
 
 // Get index of the nearest point

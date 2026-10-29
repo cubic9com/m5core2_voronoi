@@ -5,7 +5,6 @@
 #include <vector>
 #include <cmath>
 #include <memory>
-#include <esp_heap_caps.h>
 #include <algorithm>
 
 // Class for managing Voronoi diagram
@@ -16,13 +15,7 @@ public:
         int x;
         int y;
         uint16_t color;
-    };
-
-    // Seed point structure for Jump Flooding Algorithm
-    struct SeedPoint {
-        int16_t x;      // x-coordinate
-        int16_t y;      // y-coordinate
-        int16_t idx;    // index of the original point
+        uint8_t canvasColor;  // Color converted to the canvas pixel format
     };
 
     // Constructor
@@ -38,22 +31,27 @@ public:
     void draw();
 
 private:
-    // Apply repulsive force to move points
-    void applyRepulsiveForce();
+    // Maximum number of points
+    static constexpr std::size_t MAX_POINT_COUNT = 16U;
 
-    // Render Voronoi diagram using Jump Flooding Algorithm
+    // Number of colors in the palette
+    static constexpr std::size_t PALETTE_COLOR_COUNT = 20U;
+
+    // Repulsion force parameters
+    static constexpr float REPULSION_STRENGTH = 15000.0F;
+    static constexpr float REPULSION_RADIUS = 150.0F;
+
+    // Apply repulsive force to move points (returns true if any point moved)
+    bool applyRepulsiveForce();
+
+    // Render Voronoi diagram (nearest point per pixel)
     void renderVoronoiDiagram();
     
-    // Initialize JFA buffers in internal SRAM (with fallback to PSRAM)
-    void initJFABuffers();
+    // Probe the canvas pixel values of the palette colors for direct
+    // buffer writes
+    void initPaletteCanvasColors();
     
-    // Free JFA buffers
-    void freeJFABuffers();
-    
-    // Execute Jump Flooding Algorithm
-    void executeJFA();
-
-    // Render points
+    // Draw points
     void renderPoints();
 
     // Get index of the nearest point (used as fallback)
@@ -70,22 +68,23 @@ private:
 
     // Mutex for drawing
     SemaphoreHandle_t drawMutex;
-
-    // JFA buffers (allocated in internal SRAM when possible, with fallback to PSRAM)
-    SeedPoint* jfaBufferA = nullptr;
-    SeedPoint* jfaBufferB = nullptr;
     
     // Screen dimensions
     int screenWidth = 0;
     int screenHeight = 0;
-    int screenSize = 0;  // width * height
 
-    // Maximum number of points
-    static constexpr std::size_t MAX_POINT_COUNT = 16U;
+    // Redraw flag: set when the point set changes, cleared after drawing.
+    // Frames in which no point moved and this flag is clear are skipped.
+    bool needsRedraw = true;
 
-    // Repulsion force parameters
-    static constexpr float REPULSION_STRENGTH = 15000.0F;
-    static constexpr float REPULSION_RADIUS = 150.0F;
+    // Scratch arrays for the repulsion forces (fixed size, no allocation)
+    float forceX[MAX_POINT_COUNT];
+    float forceY[MAX_POINT_COUNT];
+
+    // Palette colors converted to the canvas pixel format (probed at
+    // construction time), indexed like COLOR_PALETTE
+    uint8_t paletteCanvasColors[PALETTE_COLOR_COUNT];
+    bool paletteCanvasColorsReady = false;
 
     // Color palette (20 pastel colors) - RGB565 format
     static const uint16_t COLOR_PALETTE[20];

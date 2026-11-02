@@ -34,6 +34,15 @@ static bool setupApplication() {
     screenBuffer.setColorDepth(8);  // Set to 8-bit color depth
     screenBuffer.createSprite(width, height);
 
+    // Show a start prompt in the center of the screen. Nothing else is
+    // drawn until the first touch adds a point, and the first rendered
+    // frame covers the whole screen, so the prompt only ever appears
+    // at startup and disappears on the first touch
+    M5.Display.setTextColor(WHITE);
+    M5.Display.setTextSize(2);
+    M5.Display.drawCenterString("Touch to start", width / 2,
+                                height / 2 - M5.Display.fontHeight() / 2);
+
     // Initialize sound manager and play startup sound
     soundManager.initialize();
     soundManager.playStartupSequence();

@@ -13,35 +13,31 @@ A Voronoi diagram you can touch. The m5core2_voronoi project is an interactive V
 
 # Installation / インストール
 
-1. Register an [M5Stack Community](https://community.m5stack.com/) account if you haven't already.
+1. Open https://burner.m5stack.com/YBJ8A9 .
 
-1. Launch [M5Burner](https://docs.m5stack.com/en/download) .
+1. Click `Burn to device` button.
 
-1. Click `USER CUSTOM` in the lower left corner.
+1. Click `Continue` button.
 
-1. Log in to the M5Stack Community.
+1. Click `Select COM` button.
 
-1. Click the `Share Burn` button.
+1. Select `CP2104 USB to UART Bridge Controller` in a dialog.
 
-1. Enter `4ttapIWdvEU0IvJE` in the `Share Code` field.
-
-1. Click the lightning icon :zap: .
+1. Click `Connect` button.
 
 \[日本語\]
 
-1. [M5Stack Community](https://community.m5stack.com/) のアカウントをまだ登録していない場合は登録してください。
+1. https://burner.m5stack.com/YBJ8A9 を開く。
 
-1. [M5Burner](https://docs.m5stack.com/en/download) を起動します。
+1. `デバイスに書き込む` ボタンをクリックする。
 
-1. 左下隅の `USER CUSTOM` をクリックします。
+1. `続行` ボタンをクリックする。
 
-1. M5Stack Communityにログインします。
+1. `COMを選択` ボタンをクリックする。
 
-1. `Share Burn` ボタンをクリックします。
+1. ダイアログで `CP2104 USB to UART Bridge Controller` を選択する。
 
-1. `Share Code` フィールドに `4ttapIWdvEU0IvJE` と入力します。
-
-1. 稲妻アイコン :zap: をクリックします。
+1. `接続` ボタンをクリックする。
 
 # Installation for developers / インストール（開発者向け）
 

@@ -27,6 +27,8 @@ private:
     // Task handles
     TaskHandle_t touchTaskHandle = nullptr;
     TaskHandle_t drawTaskHandle = nullptr;
+    TaskHandle_t pushTaskHandle = nullptr;
+    TaskHandle_t renderWorkerTaskHandle = nullptr;
 
     // Mutex for drawing
     SemaphoreHandle_t drawMutex = nullptr;
@@ -36,4 +38,10 @@ private:
 
     // Voronoi task function (static)
     static void drawTaskFunction(void* args);
+
+    // Display transfer task function (static)
+    static void pushTaskFunction(void* args);
+
+    // Render worker task function (static)
+    static void renderWorkerTaskFunction(void* args);
 };

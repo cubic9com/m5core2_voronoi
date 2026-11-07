@@ -4,8 +4,9 @@
 #include "TaskManager.h"
 #include "SoundManager.h"
 
-// Off-screen buffer
-static M5Canvas screenBuffer;
+// Off-screen buffers (double buffer: while one is transferred to the
+// display, the next frame is rendered into the other)
+static M5Canvas screenBuffers[2];
 
 // Global sound manager
 static SoundManager soundManager;
@@ -30,9 +31,17 @@ static bool setupApplication() {
     const int width = M5.Display.width();
     const int height = M5.Display.height();
     
-    // Create sprite
-    screenBuffer.setColorDepth(8);  // Set to 8-bit color depth
-    screenBuffer.createSprite(width, height);
+    // Create sprites. Keep the buffers in internal SRAM (76,800 bytes
+    // each), which both cores can read and write faster than PSRAM;
+    // fall back to PSRAM if internal SRAM is insufficient
+    for (int i = 0; i < 2; ++i) {
+        screenBuffers[i].setColorDepth(8);  // Set to 8-bit color depth
+        screenBuffers[i].setPsram(false);
+        if (screenBuffers[i].createSprite(width, height) == nullptr) {
+            screenBuffers[i].setPsram(true);
+            screenBuffers[i].createSprite(width, height);
+        }
+    }
 
     // Show a start prompt in the center of the screen. Nothing else is
     // drawn until the first touch adds a point, and the first rendered
@@ -69,7 +78,7 @@ void setup() {
     configASSERT(drawMutex);
 
     // Create Voronoi diagram
-    voronoiDiagram = new VoronoiDiagram(screenBuffer, drawMutex);
+    voronoiDiagram = new VoronoiDiagram(screenBuffers[0], screenBuffers[1], drawMutex);
 
     // Create touch handler
     touchHandler = new TouchHandler(*voronoiDiagram, soundManager);
